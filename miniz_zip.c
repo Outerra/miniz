@@ -26,6 +26,8 @@
  **************************************************************************/
 #include "miniz_zip.h"
 
+#include "lzma/LzmaDec.h"
+
 #ifndef MINIZ_NO_ARCHIVE_APIS
 
 #ifdef __cplusplus
@@ -1112,7 +1114,7 @@ mz_bool mz_zip_reader_is_file_supported(mz_zip_archive *pZip, mz_uint file_index
     method = MZ_READ_LE16(p + MZ_ZIP_CDH_METHOD_OFS);
     bit_flag = MZ_READ_LE16(p + MZ_ZIP_CDH_BIT_FLAG_OFS);
 
-    if ((method != 0) && (method != MZ_DEFLATED))
+    if ((method != 0) && (method != MZ_DEFLATED) && (method != MZ_LZMA))
     {
         mz_zip_set_error(pZip, MZ_ZIP_UNSUPPORTED_METHOD);
         return MZ_FALSE;
@@ -1668,7 +1670,7 @@ mz_bool mz_zip_reader_extract_to_callback(mz_zip_archive *pZip, mz_uint file_ind
         return mz_zip_set_error(pZip, MZ_ZIP_UNSUPPORTED_ENCRYPTION);
 
     /* This function only supports decompressing stored and deflate. */
-    if ((!(flags & MZ_ZIP_FLAG_COMPRESSED_DATA)) && (file_stat.m_method != 0) && (file_stat.m_method != MZ_DEFLATED))
+    if ((!(flags & MZ_ZIP_FLAG_COMPRESSED_DATA)) && (file_stat.m_method != 0) && (file_stat.m_method != MZ_DEFLATED) && (file_stat.m_method != MZ_LZMA))
         return mz_zip_set_error(pZip, MZ_ZIP_UNSUPPORTED_METHOD);
 
     /* Read and do some minimal validation of the local directory entry (this doesn't crack the zip64 stuff, which we already have from the central dir) */
@@ -1756,7 +1758,7 @@ mz_bool mz_zip_reader_extract_to_callback(mz_zip_archive *pZip, mz_uint file_ind
             }
         }
     }
-    else
+    else if (file_stat.m_method == MZ_DEFLATED)
     {
         tinfl_decompressor inflator;
         tinfl_init(&inflator);
@@ -1788,6 +1790,70 @@ mz_bool mz_zip_reader_extract_to_callback(mz_zip_archive *pZip, mz_uint file_ind
 
                 in_buf_size = (size_t)read_buf_avail;
                 status = tinfl_decompress(&inflator, (const mz_uint8 *)pRead_buf + read_buf_ofs, &in_buf_size, (mz_uint8 *)pWrite_buf, pWrite_buf_cur, &out_buf_size, comp_remaining ? TINFL_FLAG_HAS_MORE_INPUT : 0);
+                read_buf_avail -= in_buf_size;
+                read_buf_ofs += in_buf_size;
+
+                if (out_buf_size)
+                {
+                    if (pCallback(pOpaque, out_buf_ofs, pWrite_buf_cur, out_buf_size) != out_buf_size)
+                    {
+                        mz_zip_set_error(pZip, MZ_ZIP_WRITE_CALLBACK_FAILED);
+                        status = TINFL_STATUS_FAILED;
+                        break;
+                    }
+
+#ifndef MINIZ_DISABLE_ZIP_READER_CRC32_CHECKS
+                    file_crc32 = (mz_uint32)mz_crc32(file_crc32, pWrite_buf_cur, out_buf_size);
+#endif
+                    if ((out_buf_ofs += out_buf_size) > file_stat.m_uncomp_size)
+                    {
+                        mz_zip_set_error(pZip, MZ_ZIP_DECOMPRESSION_FAILED);
+                        status = TINFL_STATUS_FAILED;
+                        break;
+                    }
+                }
+            } while ((status == TINFL_STATUS_NEEDS_MORE_INPUT) || (status == TINFL_STATUS_HAS_MORE_OUTPUT));
+        }
+    }
+    else /*if (file_stat.m_method == MZ_LZMA)*/
+    {
+        CLzmaDec lzmadec;
+        LzmaDec_Init(&lzmadec);
+
+        if (NULL == (pWrite_buf = pZip->m_pAlloc(pZip->m_pAlloc_opaque, 1, TINFL_LZ_DICT_SIZE)))
+        {
+            mz_zip_set_error(pZip, MZ_ZIP_ALLOC_FAILED);
+            status = TINFL_STATUS_FAILED;
+        }
+        else
+        {
+            do
+            {
+                mz_uint8 *pWrite_buf_cur = (mz_uint8 *)pWrite_buf + (out_buf_ofs & (TINFL_LZ_DICT_SIZE - 1));
+                size_t in_buf_size, out_buf_size = TINFL_LZ_DICT_SIZE - (out_buf_ofs & (TINFL_LZ_DICT_SIZE - 1));
+                if ((!read_buf_avail) && (!pZip->m_pState->m_pMem))
+                {
+                    read_buf_avail = MZ_MIN(read_buf_size, comp_remaining);
+                    if (pZip->m_pRead(pZip->m_pIO_opaque, cur_file_ofs, pRead_buf, (size_t)read_buf_avail) != read_buf_avail)
+                    {
+                        mz_zip_set_error(pZip, MZ_ZIP_FILE_READ_FAILED);
+                        status = TINFL_STATUS_FAILED;
+                        break;
+                    }
+                    cur_file_ofs += read_buf_avail;
+                    comp_remaining -= read_buf_avail;
+                    read_buf_ofs = 0;
+                }
+
+                in_buf_size = (size_t)read_buf_avail;
+                //status = tinfl_decompress(&inflator, (const mz_uint8 *)pRead_buf + read_buf_ofs, &in_buf_size, (mz_uint8 *)pWrite_buf, pWrite_buf_cur, &out_buf_size, comp_remaining ? TINFL_FLAG_HAS_MORE_INPUT : 0);
+
+                ELzmaStatus lzstatus;
+                int sres = LzmaDec_DecodeToBuf(&lzmadec, (Byte*)pWrite_buf, &out_buf_size,
+                    (const mz_uint8 *)pRead_buf + read_buf_ofs, &in_buf_size, 
+                    comp_remaining ? LZMA_FINISH_ANY : LZMA_FINISH_END,
+                    &lzstatus);
+
                 read_buf_avail -= in_buf_size;
                 read_buf_ofs += in_buf_size;
 

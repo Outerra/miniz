@@ -1,0 +1,39 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="miniz.c" />
+    <ClCompile Include="miniz_tdef.c" />
+    <ClCompile Include="miniz_tinfl.c" />
+    <ClCompile Include="miniz_zip.c" />
+    <ClCompile Include="lzma\Lzma2Dec.c">
+      <Filter>lzma</Filter>
+    </ClCompile>
+    <ClCompile Include="lzma\LzmaDec.c">
+      <Filter>lzma</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="miniz.h" />
+    <ClInclude Include="miniz_common.h" />
+    <ClInclude Include="miniz_tdef.h" />
+    <ClInclude Include="miniz_tinfl.h" />
+    <ClInclude Include="miniz_zip.h" />
+    <ClInclude Include="lzma\7zTypes.h">
+      <Filter>lzma</Filter>
+    </ClInclude>
+    <ClInclude Include="lzma\Lzma2Dec.h">
+      <Filter>lzma</Filter>
+    </ClInclude>
+    <ClInclude Include="lzma\LzmaDec.h">
+      <Filter>lzma</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="readme.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="lzma">
+      <UniqueIdentifier>{43193286-441c-4c0c-bdde-bb5cc812c9a4}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
