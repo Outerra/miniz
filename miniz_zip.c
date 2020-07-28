@@ -1869,7 +1869,14 @@ mz_bool mz_zip_reader_extract_to_callback(mz_zip_archive *pZip, mz_uint file_ind
                         break;
                     }
 
-                    LzmaDec_Allocate(&lzmadec, u8buf + 4, LZMA_PROPS_SIZE, &SzAllocForLzma);
+                    SRes sres = LzmaDec_Allocate(&lzmadec, u8buf + 4, LZMA_PROPS_SIZE, &SzAllocForLzma);
+                    //SRes sres = Lzma2Dec_Allocate(&lzmadec, u8buf[4], &SzAllocForLzma);
+                    if (sres != SZ_OK)
+                    {
+                        mz_zip_set_error(pZip, MZ_ZIP_DECOMPRESSION_FAILED);
+                        status = TINFL_STATUS_FAILED;
+                        break;
+                    }
                     LzmaDec_Init(&lzmadec);
 
                     read_buf_avail -= 4 + LZMA_PROPS_SIZE;
@@ -1885,7 +1892,7 @@ mz_bool mz_zip_reader_extract_to_callback(mz_zip_archive *pZip, mz_uint file_ind
                 ELzmaFinishMode fm = out_buf_size < remout ? LZMA_FINISH_ANY : LZMA_FINISH_END;
 
                 ELzmaStatus lzstatus;
-                int sres = LzmaDec_DecodeToBuf(&lzmadec, (Byte*)pWrite_buf_cur, &out_buf_size,
+                SRes sres = LzmaDec_DecodeToBuf(&lzmadec, (Byte*)pWrite_buf_cur, &out_buf_size,
                     (const mz_uint8 *)pRead_buf + read_buf_ofs, &in_buf_size,
                     fm, &lzstatus);
 
@@ -1923,6 +1930,11 @@ mz_bool mz_zip_reader_extract_to_callback(mz_zip_archive *pZip, mz_uint file_ind
                     }
                 }
             } while ((status == TINFL_STATUS_NEEDS_MORE_INPUT) || (status == TINFL_STATUS_HAS_MORE_OUTPUT));
+        }
+
+        if (lzinit)
+        {
+            LzmaDec_Free(&lzmadec, &SzAllocForLzma);
         }
     }
 
